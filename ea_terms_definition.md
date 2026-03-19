@@ -1,4 +1,4 @@
-# EA Market – Term Definitions (Developer Reference)
+﻿# EA Market – Term Definitions (Developer Reference)
 
 > **Nguồn dữ liệu duy nhất**: Bảng `Orders` — query theo `login` (lấy từ `EA_Registry` theo `eaCode`)  
 > **Input chuẩn cho mọi công thức**:
@@ -54,7 +54,7 @@ WITH c AS (
   SELECT closeTime,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0))
            OVER (ORDER BY closeTime) AS cum_pnl
-  FROM Orders WHERE login = 193583 AND closeTime > 0
+  FROM Orders WHERE login = \{login\} AND closeTime > 0
     AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 3000 DAY)*1000
 ),
@@ -76,6 +76,20 @@ FROM p;
 - `drawdown_pct > 30%` → xét Soft Kill
 - `drawdown_pct > 70%` → Hard Kill ngay
 
+> #### ⚠️ Lưu ý quan trọng — Khác biệt với Myfxbook
+>
+> **Myfxbook** tính drawdown bao gồm **floating P&L (lệnh đang mở)**:
+> ```
+> myfxbook_dd = (peak_balance - lowest_equity_including_open_trades) / peak_balance
+> ```
+> **Project này** chỉ tính trên **closed trades** (`closeTime > 0`):
+> ```
+> project_dd = MIN((cum_closed_pnl - peak_cum_pnl) / (initial + peak_cum_pnl))
+> ```
+> → Drawdown của project sẽ **thấp hơn Myfxbook** vì không capture floating losses.
+> → Đây là **design decision có chủ đích**: hệ thống dùng bảng `Orders` (closed only).
+> → Khi so sánh với Myfxbook, cần ghi chú rõ sự khác biệt này.
+
 ---
 
 ### 2. Loss Acceleration
@@ -94,7 +108,7 @@ SELECT COUNT(*) AS consecutive_losses
 FROM (
   SELECT profit,
          ROW_NUMBER() OVER (ORDER BY closeTime DESC) AS rn
-  FROM Orders WHERE login = 193583 AND closeTime > 0
+  FROM Orders WHERE login = \{login\} AND closeTime > 0
     AND orderType IN (0, 1)
 ) ranked
 WHERE rn < (
@@ -102,7 +116,7 @@ WHERE rn < (
   FROM (
     SELECT profit,
            ROW_NUMBER() OVER (ORDER BY closeTime DESC) AS rn
-    FROM Orders WHERE login = 193583 AND closeTime > 0
+    FROM Orders WHERE login = \{login\} AND closeTime > 0
       AND orderType IN (0, 1)
   ) t2
   WHERE profit > 0   -- phan loai theo raw profit (chuan myfxbook)
@@ -132,7 +146,7 @@ SELECT
   NULLIF(ABS(SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END)), 0)
     AS profit_factor
 FROM Orders
-WHERE login = 193583 AND closeTime > 0
+WHERE login = \{login\} AND closeTime > 0
   AND orderType IN (0, 1)
   AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000;
 ```
@@ -161,7 +175,7 @@ SELECT STDDEV(weekly_pnl) AS pnl_stddev
 FROM (
   SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-  FROM Orders WHERE login = 193583 AND closeTime > 0
+  FROM Orders WHERE login = \{login\} AND closeTime > 0
     AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 90 DAY)*1000
   GROUP BY wk
@@ -194,7 +208,7 @@ SELECT
 FROM (
   SELECT commision,
          AVG(ABS(commision)) OVER () AS avg_c
-  FROM Orders WHERE login = 193583 AND closeTime > 0
+  FROM Orders WHERE login = \{login\} AND closeTime > 0
     AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
 ) t;
@@ -223,7 +237,7 @@ FROM (
   FROM (
     SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
            SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-    FROM Orders WHERE login = 193583 AND closeTime > 0
+    FROM Orders WHERE login = \{login\} AND closeTime > 0
       AND orderType IN (0, 1)
     GROUP BY wk
   ) w
@@ -236,7 +250,7 @@ WHERE rn < (
     FROM (
       SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
              SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-      FROM Orders WHERE login = 193583 AND closeTime > 0
+      FROM Orders WHERE login = \{login\} AND closeTime > 0
         AND orderType IN (0, 1)
       GROUP BY wk
     ) w2
@@ -249,7 +263,7 @@ WHERE rn < (
 
 ---
 
-### 7. Declining Performance Trend
+### 8. Declining Performance Trend
 
 **Định nghĩa**: So sánh profit_factor của **2 tuần gần nhất** với **4 tuần trước đó**. Nếu giảm → trend xấu đi.
 
@@ -282,7 +296,7 @@ SELECT MIN(daily_pnl) AS worst_day
 FROM (
   SELECT DATE(FROM_UNIXTIME(closeTime/1000)) AS d,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS daily_pnl
-  FROM Orders WHERE login = 193583 AND closeTime > 0
+  FROM Orders WHERE login = \{login\} AND closeTime > 0
     AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
   GROUP BY d
@@ -390,37 +404,37 @@ AND o.closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 180 DAY) * 1000
 
 ---
 
-## Phase 3 — Thuật ngữ liên quan đến Health Score & Capital Allocation
+## Phase 3 — Thuật ngữ liên quan đến Capital Allocation
 
 ---
 
-### 16. Drawdown Stability (Health Score component)
+### 16. Drawdown Stability (dẫn xuất từ Health Score)
 
-**Định nghĩa**: Thành phần đo mức độ kiểm soát drawdown trong Health Score.
+**Định nghĩa**: Score thành phần drawdown trong Health Score — dẫn xuất từ Term #1.
 
 **Công thức**:
 ```
--- sử dụng drawdown_pct từ Term #1 (mỹ phầm cả peak balance)
-drawdown_stability = 1 - LEAST(ABS(drawdown_pct) / 100, 1.0)
--- drawdown_pct ∈ [-100%, 0%] → ABS(drawdown_pct)/100 ∈ [0, 1]
+-- sử dụng drawdown_pct từ Term #1
+drawdown_score = 1 - LEAST(ABS(drawdown_pct) / 100, 1.0)
+-- drawdown_pct ∈ [-100%, 0%] → score ∈ [0, 1]
 ```
 
-- `drawdown_stability = 1.0` → không có drawdown
-- `drawdown_stability = 0.0` → drawdown = 100% peak balance
+- `drawdown_score = 1.0` → không có drawdown
+- `drawdown_score = 0.0` → drawdown = 100% peak balance
 
 **Input**: `drawdown_pct` từ Term #1 (dùng peak balance, không phải initial_balance cố định)
 
 ---
 
-### 17. Profitability Metrics (Health Score component)
+### 17. Profitability Score (dẫn xuất từ Health Score)
 
-**Định nghĩa**: Thành phần đo hiệu quả sinh lời trong Health Score. Kết hợp `profit_factor` và `win_rate`.
+**Định nghĩa**: Score thành phần sinh lời trong Health Score. **Lưu ý**: Health Score (Term #20) dùng profit_factor_score trực tiếp từ Term #3, không ghép combo này vào formula chính. Term này dùng để reference/UI.
 
-**Công thức**:
+**Công thức tham khảo** (không dùng trực tiếp trong Health Score formula):
 ```
 win_rate     = COUNT(profit > 0) / COUNT(*) × 100%
 pf_score     = LEAST(profit_factor / 2.0, 1.0)
-profitability = 0.6 × pf_score + 0.4 × (win_rate / 100)
+profitability_display = 0.6 × pf_score + 0.4 × (win_rate / 100)
 ```
 > Dùng **raw `profit`** để phân loại (chuẩn Myfxbook)
 
@@ -428,16 +442,16 @@ profitability = 0.6 × pf_score + 0.4 × (win_rate / 100)
 ```sql
 SELECT
   SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate
-FROM Orders WHERE login = 193583 AND closeTime > 0
+FROM Orders WHERE login = \{login\} AND closeTime > 0
   AND orderType IN (0, 1)
   AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000;
 ```
 
 ---
 
-### 18. Regime Compatibility (Health Score component)
+### 18. Regime Compatibility Score
 
-**Định nghĩa**: Thành phần đo mức độ phù hợp của EA với **regime hiện tại**, dựa trên `survival_score` tại regime đó.
+**Định nghĩa**: Score thành phần regime trong Health Score. **Lưu ý**: Term này là input phụ, được dùng để reference trong Phase 2 nhưng KHÔNG đưa vào Health Score Phase 1 formula (xem Term #20).
 
 **Công thức**:
 ```
@@ -445,6 +459,8 @@ regime_compatibility = EA_Regime_Profile[eaCode][current_regime].survival_score
 ```
 
 **Input**: Đọc trực tiếp từ bảng `EA_Regime_Profile` — không cần query `Orders` thêm.
+
+> ⚠️ Không dùng trong Health Score Phase 1 vì Phase 1 chạy TRƯỚC Phase 2.
 
 ---
 
@@ -570,13 +586,14 @@ def smooth_lot(old: float, new: float) -> float:
 
 | STT | Thuật ngữ | Input từ Orders | Output | Dùng ở đâu |
 |---|---|---|---|---|
-| 1 | Drawdown level | `profit, commision, swap, closeTime` | `drawdown_pct` (%) | Phase 1 trigger |
-| 2 | Loss acceleration | `profit, commision, swap, closeTime` | `consecutive_losses` | Phase 1 trigger |
-| 3 | Profit factor | `profit, commision, swap, closeTime` | `profit_factor` (ratio) | Phase 1 score |
-| 4 | Stability of returns | `profit, commision, swap, closeTime` | `pnl_stddev` | Phase 1 score |
-| 5 | Abnormal execution | `commision, closeTime` | `anomaly_rate` | Phase 1 score |
+| 1 | Drawdown level | `profit, commision, swap, closeTime` | `drawdown_pct` (%) | Phase 1 trigger + Health Score |
+| 2 | Loss acceleration | `profit, closeTime` | `consecutive_losses` | Phase 1 trigger + Health Score |
+| 3 | Profit factor | `profit, closeTime` | `profit_factor` (ratio) | Phase 1 score + Health Score |
+| 4 | Stability of returns | `profit, commision, swap, closeTime` | `pnl_stddev` | Phase 1 score + Health Score |
+| 5 | Abnormal execution | `commision, closeTime` | `anomaly_rate` | Phase 1 score + Health Score |
 | 6 | Consistent negative returns | `profit, commision, swap, closeTime` | `consecutive_loss_weeks` | Phase 1 trigger |
-| 7 | Declining performance trend | `profit, commision, swap, closeTime` | `declining` (bool) | Phase 1 trigger |
+| 7 | **Declining performance trend** | `profit, closeTime` | `declining` (bool) | Phase 1 trigger |
+| **8** | **(Trùng với 7 — đổi số)** | — | — | — |
 | 9 | Structural failure | `profit, commision, swap, closeTime` | `worst_day_pnl` | Phase 1 Hard Kill |
 | 10 | Persistent inability to recover | `EA_State_Log` | `days_in_soft_kill` | Phase 1 Hard Kill |
 | 11 | Increased/Reduced exposure | `EA_Regime_Profile.survival_score` | `exposure_weight` | Phase 2 output |
@@ -584,11 +601,11 @@ def smooth_lot(old: float, new: float) -> float:
 | 13 | Weighting mechanism | `survival_score` | `exposure_weight` | Phase 2 algorithm |
 | 14 | Unsuitable EAs remain available | `EA_Health.state` | — (design rule) | Phase 2 rule |
 | 15 | Regime Profile lookback | — | 180 ngày (config) | Phase 2 config |
-| 16 | Drawdown stability | `drawdown_level` (Term 1) | component [0,1] | Health Score |
-| 17 | Profitability metrics | `profit_factor` + `win_rate` | component [0,1] | Health Score |
-| 18 | Regime compatibility | `EA_Regime_Profile` | component [0,1] | Health Score |
-| 19 | Execution quality | `anomaly_rate` (Term 5) | component [0,1] | Health Score |
-| 20 | Health Score formula | Terms 16–19 | `health_score` [0,1] | Phase 1 + Phase 3 |
+| 16 | Drawdown stability score | `drawdown_pct` (Term 1) | `drawdown_score` [0,1] | Health Score input |
+| 17 | Profitability score (display) | `profit_factor` + `win_rate` | tham khảo [0,1] | UI/display |
+| 18 | Regime compatibility score | `EA_Regime_Profile` | tham khảo [0,1] | Phase 2 reference |
+| 19 | Execution quality | `anomaly_rate` (Term 5) | `execution_score` [0,1] | Health Score input |
+| **20** | **Health Score formula** | **Terms 1,2,3,4,5** | **`health_score` [0,1]** | **Phase 1 eval** |
 | 21 | Portfolio risk | `EA_Allocation.effective_lot_mult` | total units | Phase 3 guard |
 | 22 | Risk constant | — | `MAX_PORTFOLIO_EXPOSURE` (config) | Phase 3 guard |
 | 23 | Smooth and conservative | `old_lot_multiplier` | `new_lot_multiplier` | Phase 3 rebalance |
