@@ -143,12 +143,13 @@ FROM Orders WHERE login = 193583 AND closeTime > 0
 
 | Điều kiện | Transition |
 |---|---|
-| `ABS(drawdown_pct) > 70%` | → **Hard Kill** (immediate) |
+| `ABS(drawdown_pct) > 70%` | → **Hard Kill** (immediate, không cần 2 tuần) |
 | `health_score < 0.5` × 2 tuần liên tiếp | → Soft Kill |
 | `consecutive_losses >= 5` | → Soft Kill |
 | `profit_factor < 0.7` (30 ngày) | → Soft Kill |
-| `anomaly_rate > 20%` | → Hard Kill |
+| `consecutive_loss_weeks >= 2` | → Soft Kill |
 | Soft Kill > 4 tuần + `health_score < 0.3` | → Hard Kill |
+| `anomaly_rate > 20%` | → Hard Kill |
 | Soft Kill + `health_score > 0.65` × 2 tuần | → Active (recovery) |
 
 ```sql

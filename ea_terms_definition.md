@@ -5,7 +5,7 @@
 > ```sql
 > SELECT profit, commision, swap, openTime, closeTime, volume, openPrice, closePrice
 > FROM Orders
-> WHERE login = {login}
+> WHERE login = 193583
 >   AND closeTime IS NOT NULL AND closeTime > 0
 >   AND orderType IN (0, 1)
 >   AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL {N} DAY) * 1000

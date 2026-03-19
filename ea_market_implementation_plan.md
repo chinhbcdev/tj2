@@ -321,14 +321,16 @@ health_score = (
 - `health_score < 0.5` trong 2 tuần liên tiếp
 - Loss streak ≥ 5 lệnh liên tiếp (từ query consecutive_losses)
 - Profit factor < 0.7 trong 30 ngày
+- ≥ 2 tuần lỗ liên tiếp (consecutive_loss_weeks)
 
 **Hard Kill triggers:**
-- Cumulative loss > 70% initial_balance (từ drawdown query)
-- `health_score < 0.2` trong 4 tuần liên tiếp
-- Structural failure: > 20% lệnh có anomaly
+- `drawdown_pct < -70%` (cumulative loss > 70% peak balance) — **kích hoạt ngay lập tức**
+- `health_score < 0.3` trong 4 tuần liên tiếp (Soft Kill kéo dài)
+- Structural failure: > 20% lệnh có anomaly (commission bất thường)
 
 **Recovery (Soft Kill → Active):**
 - `health_score > 0.65` trong 2 tuần liên tiếp
+- Recovery rule: giữ `lot_multiplier = 0.5` thêm **2 tuần** sau khi recover
 
 ### 1.3 Implementation Tasks
 
@@ -451,29 +453,37 @@ capital-weighted success rate > 60%  ← Phase 3 tạo ra điều này
 Mỗi tuần, xếp hạng tất cả EA đang `active` theo performance trong rolling 30 ngày:
 
 ```sql
--- Tính performance score cho tất cả eaCode đang active
+-- STEP 1: Tính weekly_pnl trung gian
+CREATE TEMPORARY TABLE tmp_weekly_pnl AS
 SELECT
   r.eaCode,
-  SUM(o.profit + COALESCE(o.commision,0) + COALESCE(o.swap,0))   AS net_pnl,
-  COUNT(*)                                                          AS total_trades,
+  YEARWEEK(FROM_UNIXTIME(o.closeTime / 1000)) AS wk,
+  SUM(o.profit + COALESCE(o.commision,0) + COALESCE(o.swap,0)) AS weekly_pnl
+FROM Orders o
+JOIN EA_Registry r ON o.login = r.login
+JOIN EA_Health h   ON h.eaCode = r.eaCode
+WHERE h.state = 'active'
+  AND o.closeTime IS NOT NULL AND o.closeTime > 0
+  AND o.orderType IN (0, 1)
+  AND o.closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
+GROUP BY r.eaCode, wk;
+
+-- STEP 2: Tính performance_score tổng hợp
+SELECT
+  r.eaCode,
+  SUM(o.profit + COALESCE(o.commision,0) + COALESCE(o.swap,0)) AS net_pnl,
+  COUNT(*) AS total_trades,
   SUM(CASE WHEN o.profit > 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS win_rate,
   SUM(CASE WHEN o.profit > 0 THEN o.profit ELSE 0 END)
     / NULLIF(ABS(SUM(CASE WHEN o.profit < 0 THEN o.profit ELSE 0 END)), 0) AS profit_factor,
-  STDDEV(weekly_pnl)                                               AS pnl_stddev
-FROM (
-  SELECT
-    r2.eaCode,
-    YEARWEEK(FROM_UNIXTIME(o2.closeTime / 1000))                  AS wk,
-    SUM(o2.profit + COALESCE(o2.commision,0) + COALESCE(o2.swap,0)) AS weekly_pnl
-  FROM Orders o2
-  JOIN EA_Registry r2 ON o2.login = r2.login
-  WHERE o2.closeTime IS NOT NULL AND o2.closeTime > 0
-    AND o2.orderType IN (0, 1)
-    AND o2.closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
-  GROUP BY r2.eaCode, wk
-) weekly_data
-JOIN Orders o ON o.login = (SELECT login FROM EA_Registry WHERE eaCode = weekly_data.eaCode)
-JOIN EA_Registry r ON r.eaCode = weekly_data.eaCode
+  (SELECT STDDEV(weekly_pnl) FROM tmp_weekly_pnl t WHERE t.eaCode = r.eaCode) AS pnl_stddev
+FROM Orders o
+JOIN EA_Registry r ON o.login = r.login
+JOIN EA_Health h   ON h.eaCode = r.eaCode
+WHERE h.state = 'active'
+  AND o.closeTime IS NOT NULL AND o.closeTime > 0
+  AND o.orderType IN (0, 1)
+  AND o.closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
 GROUP BY r.eaCode;
 ```
 

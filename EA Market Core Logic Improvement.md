@@ -195,15 +195,16 @@ Goal: improve **capital-weighted success rate** of the portfolio.
 ### Core Principle
 > Strategies that demonstrate stronger and more stable behaviour receive a larger share of capital, while weaker strategies receive less exposure.
 
-### Health Score → Lot Multiplier
+### Performance Rank → Lot Multiplier
 
-| Health Score | Lot Multiplier |
-|---|---|
-| 80 – 100 | × 1.5 |
-| 60 – 79 | × 1.0 |
-| 40 – 59 | × 0.6 |
-| 20 – 39 | × 0.3 |
-| < 20 | × 0 (Soft Kill) |
+| Percentile Rank | Lot Multiplier | Ý nghĩa |
+|---|---|---|
+| ≥ 80% (Top 20%) | × 1.5 | Tập trung vốn vào EA mạnh nhất |
+| 20–80% (Mid 60%) | × 1.0 | Giữ nguyên |
+| < 20% (Bottom 20%) | × 0.5 | Giảm exposure EA yếu |
+
+> **Rank theo `performance_score` tổng hợp** (rolling 30 ngày):
+> `0.40 × pf_score + 0.30 × net_pnl_norm + 0.20 × win_rate + 0.10 × stability_score`
 
 ### Effective Lot (Combined Phase 2 + Phase 3)
 
