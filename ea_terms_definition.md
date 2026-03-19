@@ -7,6 +7,7 @@
 > FROM Orders
 > WHERE login = {login}
 >   AND closeTime IS NOT NULL AND closeTime > 0
+>   AND orderType IN (0, 1)
 >   AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL {N} DAY) * 1000
 > ORDER BY closeTime ASC;
 > ```
@@ -40,26 +41,35 @@ drawdown[i] = cum_pnl[i] - peak[i]          ← luôn ≤ 0
 drawdown_level = MIN(drawdown[i])            ← giá trị âm lớn nhất
 ```
 
-**Dạng %** (nếu biết `initial_balance`):
+**Dạng %**:
 ```
-drawdown_pct = |drawdown_level| / initial_balance × 100
+-- Chia theo peak balance thực tế, không phải initial_balance cố định
+drawdown_pct = |drawdown_level| / (initial_balance + peak_cum_pnl) × 100
 ```
+> ⚠️ Không dùng `|DD| / initial_balance` vì tài khoản đã tăng vốn qua thời gian.
 
-**SQL**:
+**SQL** (dùng `INTERVAL 3000 DAY` để cover toàn bộ lịch sử):
 ```sql
 WITH c AS (
   SELECT closeTime,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0))
            OVER (ORDER BY closeTime) AS cum_pnl
-  FROM Orders WHERE login = X AND closeTime > 0
-    AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
+  FROM Orders WHERE login = 193583 AND closeTime > 0
+    AND orderType IN (0, 1)
+    AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 3000 DAY)*1000
 ),
 p AS (
   SELECT cum_pnl,
-         MAX(cum_pnl) OVER (ORDER BY closeTime) AS peak
+         MAX(cum_pnl) OVER (ORDER BY closeTime) AS peak_cum_pnl
   FROM c
 )
-SELECT MIN(cum_pnl - peak) AS drawdown_level FROM p;
+SELECT
+  MIN(cum_pnl - peak_cum_pnl)                                       AS drawdown_level,
+  MIN((cum_pnl - peak_cum_pnl) / (5000 + peak_cum_pnl)) * 100      AS drawdown_pct
+FROM p;
+-- 5000 = initial_balance, thay theo login tương ứng
+-- drawdown_pct tính tại từng điểm: (trough - peak) / (initial + peak)
+-- → lấy MIN để ra worst-case đúng với peak tương ứng của nó
 ```
 
 **Ngưỡng gợi ý**:
@@ -82,22 +92,20 @@ consecutive_losses = số lệnh thua liên tiếp gần nhất (net_pnl < 0)
 ```sql
 SELECT COUNT(*) AS consecutive_losses
 FROM (
-  SELECT net_pnl,
+  SELECT profit,
          ROW_NUMBER() OVER (ORDER BY closeTime DESC) AS rn
-  FROM (
-    SELECT closeTime,
-           profit + COALESCE(commision,0) + COALESCE(swap,0) AS net_pnl
-    FROM Orders WHERE login = X AND closeTime > 0
-  ) t
+  FROM Orders WHERE login = 193583 AND closeTime > 0
+    AND orderType IN (0, 1)
 ) ranked
 WHERE rn < (
   SELECT COALESCE(MIN(rn), 999)
   FROM (
-    SELECT profit + COALESCE(commision,0) + COALESCE(swap,0) AS net_pnl,
+    SELECT profit,
            ROW_NUMBER() OVER (ORDER BY closeTime DESC) AS rn
-    FROM Orders WHERE login = X AND closeTime > 0
+    FROM Orders WHERE login = 193583 AND closeTime > 0
+      AND orderType IN (0, 1)
   ) t2
-  WHERE net_pnl > 0
+  WHERE profit > 0   -- phan loai theo raw profit (chuan myfxbook)
 );
 ```
 
@@ -111,23 +119,22 @@ WHERE rn < (
 
 **Định nghĩa**: Tỷ lệ giữa tổng lãi và tổng lỗ (không tính lệnh hoà). Đo lường hiệu quả tổng thể.
 
-**Công thức**:
+**Công thức (chuẩn Myfxbook)**:
 ```
-profit_factor = SUM(net_pnl[i] khi net_pnl[i] > 0)
-              / ABS(SUM(net_pnl[i] khi net_pnl[i] < 0))
+profit_factor = SUM(profit khi profit > 0) / ABS(SUM(profit khi profit < 0))
 ```
+> Dùng **raw `profit`** (không gồm commision/swap) — đúng với cách Myfxbook và MT4 tính.
 
 **SQL**:
 ```sql
 SELECT
-  SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END) /
-  NULLIF(ABS(SUM(CASE WHEN net_pnl < 0 THEN net_pnl ELSE 0 END)), 0)
+  SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END) /
+  NULLIF(ABS(SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END)), 0)
     AS profit_factor
-FROM (
-  SELECT profit + COALESCE(commision,0) + COALESCE(swap,0) AS net_pnl
-  FROM Orders WHERE login = X AND closeTime > 0
-    AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
-) t;
+FROM Orders
+WHERE login = 193583 AND closeTime > 0
+  AND orderType IN (0, 1)
+  AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000;
 ```
 
 **Diễn giải**:
@@ -154,7 +161,8 @@ SELECT STDDEV(weekly_pnl) AS pnl_stddev
 FROM (
   SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-  FROM Orders WHERE login = X AND closeTime > 0
+  FROM Orders WHERE login = 193583 AND closeTime > 0
+    AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 90 DAY)*1000
   GROUP BY wk
 ) w;
@@ -186,7 +194,8 @@ SELECT
 FROM (
   SELECT commision,
          AVG(ABS(commision)) OVER () AS avg_c
-  FROM Orders WHERE login = X AND closeTime > 0
+  FROM Orders WHERE login = 193583 AND closeTime > 0
+    AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
 ) t;
 ```
@@ -214,7 +223,8 @@ FROM (
   FROM (
     SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
            SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-    FROM Orders WHERE login = X AND closeTime > 0
+    FROM Orders WHERE login = 193583 AND closeTime > 0
+      AND orderType IN (0, 1)
     GROUP BY wk
   ) w
 ) ranked
@@ -226,7 +236,8 @@ WHERE rn < (
     FROM (
       SELECT YEARWEEK(FROM_UNIXTIME(closeTime/1000)) AS wk,
              SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS weekly_pnl
-      FROM Orders WHERE login = X AND closeTime > 0
+      FROM Orders WHERE login = 193583 AND closeTime > 0
+        AND orderType IN (0, 1)
       GROUP BY wk
     ) w2
   ) r2
@@ -271,7 +282,8 @@ SELECT MIN(daily_pnl) AS worst_day
 FROM (
   SELECT DATE(FROM_UNIXTIME(closeTime/1000)) AS d,
          SUM(profit + COALESCE(commision,0) + COALESCE(swap,0)) AS daily_pnl
-  FROM Orders WHERE login = X AND closeTime > 0
+  FROM Orders WHERE login = 193583 AND closeTime > 0
+    AND orderType IN (0, 1)
     AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000
   GROUP BY d
 ) daily;
@@ -388,15 +400,15 @@ AND o.closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 180 DAY) * 1000
 
 **Công thức**:
 ```
-drawdown_stability = 1 - LEAST(|drawdown_level| / DD_THRESHOLD, 1.0)
-
-DD_THRESHOLD = ngưỡng drawdown tối đa cho phép (VD: 0.3 × initial_balance)
+-- sử dụng drawdown_pct từ Term #1 (mỹ phầm cả peak balance)
+drawdown_stability = 1 - LEAST(ABS(drawdown_pct) / 100, 1.0)
+-- drawdown_pct ∈ [-100%, 0%] → ABS(drawdown_pct)/100 ∈ [0, 1]
 ```
 
 - `drawdown_stability = 1.0` → không có drawdown
-- `drawdown_stability = 0.0` → drawdown đạt ngưỡng tối đa
+- `drawdown_stability = 0.0` → drawdown = 100% peak balance
 
-**Input**: `drawdown_level` từ Term #1
+**Input**: `drawdown_pct` từ Term #1 (dùng peak balance, không phải initial_balance cố định)
 
 ---
 
@@ -406,18 +418,18 @@ DD_THRESHOLD = ngưỡng drawdown tối đa cho phép (VD: 0.3 × initial_balanc
 
 **Công thức**:
 ```
-win_rate = COUNT(net_pnl > 0) / COUNT(*) trên N ngày
-profitability = 0.6 × profit_factor_score + 0.4 × win_rate
-
-profit_factor_score = LEAST(profit_factor / 2.0, 1.0)
+win_rate     = COUNT(profit > 0) / COUNT(*) × 100%
+pf_score     = LEAST(profit_factor / 2.0, 1.0)
+profitability = 0.6 × pf_score + 0.4 × (win_rate / 100)
 ```
+> Dùng **raw `profit`** để phân loại (chuẩn Myfxbook)
 
 **SQL win_rate**:
 ```sql
 SELECT
-  SUM(CASE WHEN profit + COALESCE(commision,0) + COALESCE(swap,0) > 0 THEN 1 ELSE 0 END)
-    * 1.0 / COUNT(*) AS win_rate
-FROM Orders WHERE login = X AND closeTime > 0
+  SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate
+FROM Orders WHERE login = 193583 AND closeTime > 0
+  AND orderType IN (0, 1)
   AND closeTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY)*1000;
 ```
 
@@ -451,18 +463,21 @@ execution_quality = 1 - anomaly_rate
 
 ### 20. Health Score Formula
 
-**Định nghĩa**: Điểm sức khoẻ tổng hợp của EA, tính từ 4 thành phần trên. Giá trị ∈ [0.0, 1.0].
+**Định nghĩa**: Điểm sức khoẻ tổng hợp của EA, tính từ 5 thành phần. Giá trị ∈ [0.0, 1.0].
 
-**Công thức**:
+**Công thức** (5 components — chạy ở Phase 1, trước Phase 2):
 ```
 health_score =
-    w1 × drawdown_stability       (Term #16)
-  + w2 × profitability            (Term #17)
-  + w3 × regime_compatibility     (Term #18)
-  + w4 × execution_quality        (Term #19)
+    0.30 × drawdown_score             (Term #1: 1 - ABS(drawdown_pct/100))
+  + 0.20 × loss_acceleration_score   (Term #2: 1 - LEAST(consecutive_losses/10, 1.0))
+  + 0.25 × profit_factor_score       (Term #3: LEAST(profit_factor/2.0, 1.0))
+  + 0.15 × return_stability_score    (Term #4: 1 - LEAST(pnl_stddev/threshold, 1.0))
+  + 0.10 × execution_normalcy_score  (Term #5: 1 - anomaly_rate)
 
-Trọng số gợi ý: w1=0.35, w2=0.30, w3=0.25, w4=0.10
-                 (tổng = 1.0)
+——————————————————————————————————————————————————
+ Tiễu chú: không dùng regime_compatibility ở Phase 1
+ vì Phase 1 chạy TRƯỚC Phase 2 — chưa có survival_score.
+——————————————————————————————————————————————————
 ```
 
 **Diễn giải**:
