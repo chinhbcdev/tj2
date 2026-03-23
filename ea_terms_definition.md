@@ -1,4 +1,4 @@
-﻿# EA Market – Term Definitions (Developer Reference)
+# EA Market – Term Definitions (Developer Reference)
 
 > **Nguồn dữ liệu duy nhất**: Bảng `Orders` — query theo `login` (lấy từ `EA_Registry` theo `eaCode`)  
 > **Input chuẩn cho mọi công thức**:
