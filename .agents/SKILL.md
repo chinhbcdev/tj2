@@ -1,8 +1,8 @@
 ---
-name: EA Market SQL & Myfxbook Review Rules
+name: ea-market-sql-myfxbook-review
+
 description: Quy tắc tự động áp dụng khi làm việc với EA Market system. Mọi SQL metrics phải theo chuẩn Myfxbook. Tự động review, không cần user nhắc lại.
 ---
-
 # SKILL — Những gì USER đã train
 
 > Chỉ chứa kiến thức USER trực tiếp dạy/sửa. Domain knowledge tự học → `forex_domain_knowledge.md`
@@ -15,19 +15,14 @@ description: Quy tắc tự động áp dụng khi làm việc với EA Market s
 
 **Mỗi conversation mới**, trước khi làm bất cứ thứ gì, PHẢI thực hiện theo thứ tự:
 
-```
-Bước 1: list_dir("/Users/cris/Desktop/tj")
-Bước 2: list_dir("/Users/cris/Desktop/tj/.agents")
-Bước 3: view_file("/Users/cris/Desktop/tj/.agents/SKILL.md")           ← file này
-Bước 4: view_file("/Users/cris/Desktop/tj/.agents/forex_domain_knowledge.md")
-Bước 5: view_file các .md khác trong project nếu liên quan đến task
-```
+
+view_file các .md khác trong project 
 
 > ⚠️ Không được bỏ qua bước này dù user không nhắc.
 
 ### 1. Luôn đọc lại TẤT CẢ file project trước khi làm task
 
-**Bước 1**: Dùng `list_dir` discover file — KHÔNG hardcode tên  
+**Bước 1**: Dùng `list_dir` discover file — KHÔNG hardcode tên
 **Bước 2**: `view_file` từng `.md` tìm được trong project
 
 ### 2. Luôn review SQL theo chuẩn Myfxbook — không cần user nhắc
@@ -43,25 +38,28 @@ Bước 5: view_file các .md khác trong project nếu liên quan đến task
 ```
 
 ### 3. Mỗi khi user dạy điều mới → cập nhật ngay file này
+
 - Không cần user nhắc lại ở lần sau
-- Nếu ảnh hưởng SQL → cập nhật cả `ea_terms_definition.md` + `ea_implementation_guide.md`
 
 ---
 
 ## SQL chuẩn Myfxbook (user đã verify)
 
 ### Profit Factor ✅
+
 ```sql
 SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END) /
 NULLIF(ABS(SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END)), 0) AS profit_factor
 ```
 
 ### Win Rate ✅
+
 ```sql
 SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate
 ```
 
 ### Max Drawdown % ✅
+
 ```sql
 WITH c AS (
   SELECT closeTime,
@@ -79,6 +77,7 @@ FROM p;
 ```
 
 ### Loss Acceleration ✅
+
 ```sql
 SELECT COUNT(*) AS consecutive_losses
 FROM (
@@ -97,25 +96,23 @@ WHERE rn < (
 
 ## Lỗi user đã sửa — không được lặp lại
 
-| ❌ Sai | ✅ Đúng |
-|--------|----------|
-| `net_pnl > 0` để phân loại win/loss | `profit > 0` |
-| `MIN(DD) / MAX(peak)` — mix 2 thời điểm | `MIN(DD/peak)` tại từng điểm |
-| Chia drawdown cho `initial_balance` cố định | Chia cho `initial_balance + peak_cum_pnl` |
-| `INTERVAL 30 DAY` cho drawdown | `INTERVAL 3000 DAY` |
-| Thiếu `AND orderType IN (0, 1)` | Luôn filter |
-| `commission` (2 's') | `commision` (1 's') |
-| Không nhân `* 1000` cho closeTime | `UNIX_TIMESTAMP(...) * 1000` |
-| Cho rằng MQL5 orderType 6 = balance | MQL5 type 6 = BUY_STOP_LIMIT. **Project dùng MQL4 format**, chỉ type 6 của MQL4 mới = balance |
-| So sánh drawdown 1:1 với Myfxbook | Myfxbook tính cả floating P&L (lệnh đang mở). Project chỉ dùng closed trades → sẽ thấp hơn |
+| ❌ Sai                                           | ✅ Đúng                                                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `net_pnl > 0` để phân loại win/loss        | `profit > 0`                                                                                         |
+| `MIN(DD) / MAX(peak)` — mix 2 thời điểm    | `MIN(DD/peak)` tại từng điểm                                                                     |
+| Chia drawdown cho `initial_balance` cố định | Chia cho `initial_balance + peak_cum_pnl`                                                            |
+| `INTERVAL 30 DAY` cho drawdown                 | `INTERVAL 3000 DAY`                                                                                  |
+| Thiếu `AND orderType IN (0, 1)`               | Luôn filter                                                                                           |
+| `commission` (2 's')                           | `commision` (1 's')                                                                                  |
+| Không nhân `* 1000` cho closeTime            | `UNIX_TIMESTAMP(...) * 1000`                                                                         |
+| Cho rằng MQL5 orderType 6 = balance             | MQL5 type 6 = BUY_STOP_LIMIT.**Project dùng MQL4 format**, chỉ type 6 của MQL4 mới = balance |
+| So sánh drawdown 1:1 với Myfxbook              | Myfxbook tính cả floating P&L (lệnh đang mở). Project chỉ dùng closed trades → sẽ thấp hơn  |
 
 ---
 
 ## Project context
 
-**Project root**: `/Users/cris/Desktop/tj`  
-**Agents/Skills**: `/Users/cris/Desktop/tj/.agents`  
-**Login mẫu**: `193583` | **initial_balance**: `5000 USD`  
+**Login mẫu**: `193583` | **initial_balance**: `5000 USD`
 **DB**: MySQL, database `EA`, bảng `Orders`, không được insert, update database
 **MCP**: `mysql://query/...`
 
@@ -126,6 +123,7 @@ WHERE rn < (
 ## Cấu trúc dữ liệu cốt lõi
 
 ### Bảng `Orders` (nguồn duy nhất)
+
 ```sql
 -- Filter bắt buộc cho mọi query
 WHERE login = {login}
@@ -196,6 +194,7 @@ CREATE TABLE `Orders` (
 
 > **Nguồn dữ liệu duy nhất**: Bảng `Orders` — query theo `login`
 > **Input chuẩn cho mọi công thức**:
+>
 > ```sql
 > SELECT profit, commision, swap, openTime, closeTime, volume, openPrice, closePrice
 > FROM Orders
@@ -206,5 +205,3 @@ CREATE TABLE `Orders` (
 > ORDER BY closeTime ASC;
 > ```
 > → Gọi kết quả này là **`closed_orders`** (window N ngày gần nhất, mặc định N=300)
-
-
