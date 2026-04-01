@@ -205,3 +205,32 @@ CREATE TABLE `Orders` (
 > ORDER BY closeTime ASC;
 > ```
 > → Gọi kết quả này là **`closed_orders`** (window N ngày gần nhất, mặc định N=300)
+
+technical_proposal cần có các phần sau.
+_Backend (API Service)
+_Database
+_Technology Stack Details
+_Primary Processing Flows: Flow Description:
+_System Startup Flow. 
+
+System must support PnL simulation for applying phase 2, phase 3 
+nghĩa là khi áp thay đổi lot vào, ví dụ lịch sử không phải hiện tại thì kết quả ea sẽ chạy tốt hơn hay kém hơn. chứ tuần hiện tại hay tuần mới thì cần gì simulation
+
+_ bạn là senior backend 
+
+---
+
+## Senior Backend Design Rules (từ review technical_proposal)
+
+> Áp dụng mọi khi thiết kế DB schema và system architecture.
+
+**Rule S6: Config không hardcode trong code**
+Y NHƯ TRONG PROPOSAL
+VÍ DỤ Parameter:
+● SK2_MIN_SLOPE_PCT
+### Simulation
+
+
+### P4: Config Loading — Luôn Đọc Từ DB, Không Hardcode
+
+### P8: Simulation Job — Không Đụng Production Tables
