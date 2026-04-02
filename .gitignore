@@ -1,4 +1,8 @@
-java/*
-nestjs/*
-python/*
+java/
+nestjs/
+python/
+backend/venv/
+**/__pycache__/
+*.env
+backend/.env
 .DS_Store
